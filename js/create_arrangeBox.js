@@ -6,6 +6,7 @@ var g_valueTable = {
   s_width: 40,
   s_hight: 40,
   s_separator: 1,
+  s_diagonal: 0,
 
   // circle size
   c_radius: 50,
@@ -14,7 +15,24 @@ var g_valueTable = {
 
   // ドラッグした場所を保存する変数
   m_dragPointX: 0,
-  m_dragPointY: 0
+  m_dragPointY: 0,
+
+  /*
+  黒色は　#000000
+  白色は　#FFFFFF
+  赤色は　#FF0000
+  緑色は　#00FF00
+  青色は　#0000FF
+  黄色は　#FFFF00*/
+
+  // color table
+  m_colorTable: {
+    "black": "#000000",
+    "red": "#FF0000",
+    "green": "#00FF00",
+    "blue": "#0000FF",
+    "yellow": "#FFFF00"
+  }
 
 };
 
@@ -26,9 +44,9 @@ class ABManager {
     // canvas stage
     this.stage;
     // Userの配列
-    this.arrayUser;
+    this.arrayUser = new Array(0);
     // Itemの配列
-    this.arrayItem;
+    this.arrayItem = new Array(0);
   }
 
   setName(name) {
@@ -46,38 +64,134 @@ class ABManager {
   getStage() {
     return this.stage;
   }
+
+  // Item
+  createItem(name, color, max) {
+    var item = new Item(name, color, max);
+    item.create(g_valueTable.c_x, g_valueTable.c_y);
+    this.arrayItem.push(item);
+  }
+
+  // User
+  createUser(name, color, num) {
+    var user = new User(name, color, num);
+    user.create(0, 0);
+    this.arrayUser.push(user);
+  }
+
+  // square を持つ box を取得する
+  getBoxBySquare(square) {
+    for (var idx = 0; idx < this.arrayUser.length; ++idx) {
+      var box = this.arrayUser[idx].getBoxBySquare(square);
+      if (box != undefined) {
+        return box;
+      }
+    }
+    return undefined;
+  }
+
+  // Boxを引数に取るItemとの衝突判定
+  isHitObj(square) {
+    //    var box = getBoxBySquare(square);
+    var ret = false;
+
+    // Itemのループ
+    for (var idx = 0; idx < this.arrayItem.length; ++idx) {
+      //circleの衝突判定
+      var item = this.arrayItem[idx];
+      ret = item.isHitObj(square);
+      /* 衝突時の処理 */
+      if (ret == true) {
+        // square
+        square.visible = false;
+        square.removeEventListener("pressmove", handleMove);
+        g_manager.getStage().removeChild(square);
+        g_manager.getStage().update();
+        // item
+        item.clearBoxes();  // 現在のboxを全部消す
+        item.setCircleColor("DarkRed");
+        item.push(square);
+        item.createBoxes();
+        break;
+      }
+    } // end for
+
+  }
+
+  isLeaveObj(box) {
+    // 生成時の座標と現在の座標の差が、箱の対角線以上でtrue
+    // 絶対値計算が無駄なので累乗値で比較
+    var square = box.getSquare();
+    var obj_distance = Math.pow((box.first_x - square.x), 2) + Math.pow((box.first_y - square.y), 2);
+    return (g_valueTable.s_diagonal < obj_distance);
+  }
+
+
 } // class ABManager
 
 // グローバル変数
 var g_manager = new ABManager();
 
-class Boxes {
-  constructor(color, num) {
+class User {
+  constructor(name, color, num) {
+    this.name = name;
     this.color = color;
     this.num = num;
+    // boxes の配列
+    this.arrayBox = new Array(0);
+  }
+
+  create(x, y) {
+    for (var idx = 0; idx < this.num; ++idx) {
+      var box = new Box(this.color);
+      box.create(x + ((g_valueTable.s_width + g_valueTable.s_separator) * idx), y);
+      this.arrayBox.push(box);
+    }
+  }
+
+  // square を持つ box を取得する
+  getBoxBySquare(square) {
+    for (var idx = 0; idx < this.arrayBox.length; ++idx) {
+      var box = this.arrayBox[idx];
+      if (square == box.getSquare()) {
+        return box;
+      }
+    }
+    return undefined;
+  }
+
+} // User
+
+class Box {
+  constructor(color) {
+    this.color = color;
+    this.square;
+    // 生成時の座標
+    this.first_x;
+    this.first_y;
+  }
+
+  getSquare() {
+    return this.square;
   }
 
   create(x, y) {
     var stage = g_manager.getStage();
+    this.square = new createjs.Shape();
+    this.square.graphics.beginFill(this.color);
+    this.square.graphics.drawRect(0, 0, g_valueTable.s_width, g_valueTable.s_hight);
+    this.first_x = this.square.x = x;
+    this.first_y = this.square.y = y;
+    stage.addChild(this.square);
+    // インタラクティブの設定
+    this.square.addEventListener("mousedown", handleDown);
+    this.square.addEventListener("pressmove", handleMove);
+    this.square.addEventListener("pressup", handleUp);
 
-    for (var idx = 0; idx < this.num; ++idx) {
-      var square = new createjs.Shape();
-      square.graphics.beginFill(this.color);
-      square.graphics.drawRect(0, 0, g_valueTable.s_width, g_valueTable.s_hight);
-      square.x = x + ((g_valueTable.s_width + g_valueTable.s_separator) * idx);
-      square.y = y;
-      this.x = square.x;
-      this.y = square.y;
-      stage.addChild(square);
-      // インタラクティブの設定
-      square.addEventListener("mousedown", handleDown);
-      square.addEventListener("pressmove", handleMove);
-      square.addEventListener("pressup", handleUp);
-    }
     // Stageの描画を更新します
     stage.update();
   }
-} // class Boxes
+} // class Box
 
 // 箱を登録するアイテム。
 class Item {
@@ -85,10 +199,11 @@ class Item {
     this.name = name;
     this.color = color;
     this.max = max;
-    this.shape;
+    this.circle;
     this.counterObj;
     this.counter = 0;
-    this.boxes;
+    // key:色, value:Boxの配列
+    this.boxes = {};
   }
 
   create(x, y) {
@@ -101,30 +216,114 @@ class Item {
     stage.addChild(itemName);
 
     // 必要なbox数
-    var needCounterObj = new createjs.Text(this.max, "24px sans-serif", "#000000");
-    needCounterObj.x = 80;
-    needCounterObj.y = 200;
-    stage.addChild(needCounterObj);
+    var needboxesObj = new createjs.Text(this.max, "24px sans-serif", "#000000");
+    needboxesObj.x = 80;
+    needboxesObj.y = 200;
+    stage.addChild(needboxesObj);
 
     // 円
-    var shape = new createjs.Shape();
-    shape.graphics.beginFill(this.color);
-    shape.graphics.drawCircle(0, 0, g_valueTable.c_radius);
-    shape.x = g_valueTable.c_x; // X 座標 200px の位置に配置
-    shape.y = g_valueTable.c_y; // Y 座標 200px の位置に配置
-    stage.addChild(shape); // 表示リストに追加
-    // 未完成
-    g_circleObj = shape;
+    this.circle = new createjs.Shape();
+    this.circle.graphics.beginFill(this.color);
+    this.circle.graphics.drawCircle(0, 0, g_valueTable.c_radius);
+    this.circle.x = g_valueTable.c_x; // X 座標 200px の位置に配置
+    this.circle.y = g_valueTable.c_y; // Y 座標 200px の位置に配置
+    stage.addChild(this.circle); // 表示リストに追加
 
     // カウンタ表示
-    var counterObj = new createjs.Text(g_counter, "24px sans-serif", "#000000");
-    counterObj.x = 200;
-    counterObj.y = 200;
-    stage.addChild(counterObj);
-    // 未完成
-    g_counterObj = counterObj;
+    this.counterObj = new createjs.Text(g_counter, "24px sans-serif", "#000000");
+    this.counterObj.x = 200;
+    this.counterObj.y = 200;
+    stage.addChild(this.counterObj);
 
     stage.update();
+  }
+
+  setCircleColor(color) {
+    this.circle.graphics.clear().beginFill(color).drawCircle(0, 0, g_valueTable.c_radius);
+  }
+
+  /*
+    countUp() {
+      this.counter++;
+      this.counterObj.text = this.counter;
+    }
+  
+    countDown() {
+      this.counter--;
+      this.counterObj.text = this.counter;
+    }
+  */
+
+  getCounter() {
+    var counter = 0;
+    for (var color in this.boxes) {
+      var array = this.boxes[color];
+      counter += array.length;
+    }
+    return counter;
+  }
+
+  isHitObj(square) {
+    if (square.visible == false) {
+      return false;
+    }
+
+    var obj_distance = Math.pow((this.circle.x - square.x), 2) + Math.pow((this.circle.y - square.y), 2);
+    // 手抜き
+    var ret = (obj_distance < Math.pow((g_valueTable.s_width + g_valueTable.c_radius), 2));
+    return ret;
+  }
+
+  push(square) {
+    var box = g_manager.getBoxBySquare(square);
+    var color = box.color;
+    if (color in this.boxes) {
+      this.boxes[color].push(box);
+    }
+    else {
+      this.boxes[color] = new Array(0);
+      this.boxes[color].push(box);
+    }
+    this.counterObj.text = this.getCounter();
+  }
+
+  pop() {
+    var box = g_manager.getBoxBySquare(square);
+    var color = box.color;
+    if (color in this.boxes) {
+      var array = this.boxes[color];
+      var key = array.indexOf(box);
+      if (key >= 0) {
+        array.splice(key, 1);
+      }
+    }
+  }
+
+  // 手持ちの箱の表示を消す
+  clearBoxes() {
+    for (var color in this.boxes) {
+      var array = this.boxes[color];
+      for (var idx in array) {
+        var box = array[idx];
+        g_manager.getStage().removeChild(box);
+      }
+    }
+  }
+
+  // 手持ちの箱を表示する
+  createBoxes() {
+    for (var color in this.boxes) {
+      var array = this.boxes[color];
+      for (var idx in array) {
+        var box = array[idx];
+
+        // 箱を作り直す
+        // 円のx + 半径 + space + index offset(1)
+        box.create(
+          this.circle.x + (g_valueTable.c_radius + 10) + (idx * (g_valueTable.s_width + 1)),
+           this.circle.y);
+      }
+    }
   }
 
 } // class Item
@@ -137,12 +336,24 @@ var g_counter = 0;
 
 
 function init() {
+  var hash = { "#000000": 100, "#FF0000": 200 };
+
+  for (var key in g_valueTable.m_colorTable) {
+    var color = g_valueTable.m_colorTable[key];
+    if (color in hash) {
+      console.log(color + " " + hash[color]);
+    }
+    else {
+      console.log(color + " none");
+    }
+
+  }
+
   // Stageオブジェクトを作成します
   var stage = new createjs.Stage("myCanvas");
   g_manager.setStage(stage);
 
-  var item = new Item("item1", "#00FF00", 7);
-  item.create(g_valueTable.c_x, g_valueTable.c_y);
+  g_manager.createItem("item1", "#00FF00", 7);
 
   /*
     // 円を作成します
@@ -165,10 +376,11 @@ function init() {
     g_counterObj = counterObj;
     */
 
-  // Boxes
-  var boxes = new Boxes("#000000", 3);
-  boxes.create(0, 0);
+  // User
+  g_manager.createUser("Mr.X", "#000000", 3);
 
+  // 数値計算
+  g_valueTable.s_diagonal = Math.pow(g_valueTable.s_width, 2) + Math.pow(g_valueTable.s_hight, 2);
 
 }
 
@@ -205,6 +417,10 @@ function isHitObjs(square, circle) {
 
 function handleMove(event) {
   var instance = event.target;
+  if (instance.visible == false) {
+    return;
+  }
+
   // 表示オブジェクトはマウス座標に追随する
   // ただしドラッグ開始地点との補正をいれておく
   instance.x = g_manager.getStage().mouseX - g_valueTable.m_dragPointX;
@@ -218,39 +434,39 @@ function handleMove(event) {
   // 当たり判定
   var isHit = g_circleObj.hitTest(point.x, point.y);
   */
-  var isHit = isHitObjs(instance, g_circleObj);
+  //var isHit = isHitObjs(instance, g_circleObj);
+  var isHit = g_manager.isHitObj(instance);
 
   if (isHit == true) {
-    g_circleObj.graphics.clear().beginFill("DarkRed").drawCircle(0, 0, 50);
+    //    g_circleObj.graphics.clear().beginFill("DarkRed").drawCircle(0, 0, 50);
+    console.log("[debug] " + instance.color);
 
-    g_counter++;
-    g_counterObj.text = g_counter;
 
     //instance.x = 260;
     //instance.y = 200;
-
-    var instance = event.target;
-    instance.removeEventListener("pressmove", handleMove);
-    g_manager.getStage().removeChild(instance);
-
-    // 新しいの作る
-    var square = new createjs.Shape();
-    square.graphics.beginFill("#000000");
-    square.graphics.drawRect(0, 0, 40, 40);
-    square.x = 300;
-    square.y = 200;
-    g_manager.getStage().addChild(square);
-
-    // インタラクティブの設定
-    square.addEventListener("mousedown", handleDown);
-    square.addEventListener("pressmove", handleMove);
-    square.addEventListener("pressup", handleUp);
-
+    /*
+        var instance = event.target;
+        instance.removeEventListener("pressmove", handleMove);
+        g_manager.getStage().removeChild(instance);
+    
+        // 新しいの作る
+        var square = new createjs.Shape();
+        square.graphics.beginFill("#000000");
+        square.graphics.drawRect(0, 0, 40, 40);
+        square.x = 300;
+        square.y = 200;
+        g_manager.getStage().addChild(square);
+    
+        // インタラクティブの設定
+        square.addEventListener("mousedown", handleDown);
+        square.addEventListener("pressmove", handleMove);
+        square.addEventListener("pressup", handleUp);
+    */
     //instance = square;
 
   }
   else {
-    g_circleObj.graphics.clear().beginFill("#00FF00").drawCircle(0, 0, 50);
+    //    g_circleObj.graphics.clear().beginFill("#00FF00").drawCircle(0, 0, 50);
   }
 
   g_manager.getStage().update();
