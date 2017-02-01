@@ -118,12 +118,26 @@ class ABManager {
 
   }
 
-  isLeaveObj(box) {
+  isLeaveObj(square) {
+    var box = g_manager.getBoxBySquare(square);
     // 生成時の座標と現在の座標の差が、箱の対角線以上でtrue
     // 絶対値計算が無駄なので累乗値で比較
-    var square = box.getSquare();
     var obj_distance = Math.pow((box.first_x - square.x), 2) + Math.pow((box.first_y - square.y), 2);
-    return (g_valueTable.s_diagonal < obj_distance);
+    var ret = (g_valueTable.s_diagonal < obj_distance);
+
+    if (ret == true) {
+      var item = box.getRegItem();
+      if (item != undefined) {
+        item.setCircleColor("Blue");
+        box.setRegItem(undefined);
+        // Itemからpop
+        item.pop(square);
+        item.clearBoxes();  // 現在のboxを全部消す
+        item.createBoxes();
+      }
+    }
+
+    return ret;
   }
 
 
@@ -162,6 +176,7 @@ class User {
 
 } // User
 
+// Box
 class Box {
   constructor(color) {
     this.color = color;
@@ -169,13 +184,27 @@ class Box {
     // 生成時の座標
     this.first_x;
     this.first_y;
+    // どのItemに所有されているか
+    this.regItem;
+  }
+
+  getColor() {
+    return this.color;
+  }
+
+  setRegItem(item) {
+    this.regItem = item;
+  }
+
+  getRegItem() {
+    return this.regItem;
   }
 
   getSquare() {
     return this.square;
   }
 
-  create(x, y) {
+  createSquare(x, y) {
     var stage = g_manager.getStage();
     this.square = new createjs.Shape();
     this.square.graphics.beginFill(this.color);
@@ -183,13 +212,29 @@ class Box {
     this.first_x = this.square.x = x;
     this.first_y = this.square.y = y;
     stage.addChild(this.square);
-    // インタラクティブの設定
-    this.square.addEventListener("mousedown", handleDown);
-    this.square.addEventListener("pressmove", handleMove);
-    this.square.addEventListener("pressup", handleUp);
+  }
 
+  addEvent() {
+    if (this.regItem != undefined) {
+      // インタラクティブの設定
+      this.square.addEventListener("mousedown", handleDown);
+      this.square.addEventListener("pressmove", handleMoveFromCircle);
+      this.square.addEventListener("pressup", handleUp);
+    }
+    else {
+      // インタラクティブの設定
+      this.square.addEventListener("mousedown", handleDown);
+      this.square.addEventListener("pressmove", handleMove);
+      this.square.addEventListener("pressup", handleUp);
+    }
+  }
+
+  create(x, y, parent) {
+    this.createSquare(x, y);
+    this.setRegItem(parent);
+    this.addEvent();
     // Stageの描画を更新します
-    stage.update();
+    g_manager.getStage().update();
   }
 } // class Box
 
@@ -276,7 +321,7 @@ class Item {
 
   push(square) {
     var box = g_manager.getBoxBySquare(square);
-    var color = box.color;
+    var color = box.getColor();
     if (color in this.boxes) {
       this.boxes[color].push(box);
     }
@@ -287,9 +332,9 @@ class Item {
     this.counterObj.text = this.getCounter();
   }
 
-  pop() {
+  pop(square) {
     var box = g_manager.getBoxBySquare(square);
-    var color = box.color;
+    var color = box.getColor();
     if (color in this.boxes) {
       var array = this.boxes[color];
       var key = array.indexOf(box);
@@ -297,6 +342,7 @@ class Item {
         array.splice(key, 1);
       }
     }
+    this.counterObj.text = this.getCounter();
   }
 
   // 手持ちの箱の表示を消す
@@ -305,9 +351,10 @@ class Item {
       var array = this.boxes[color];
       for (var idx in array) {
         var box = array[idx];
-        g_manager.getStage().removeChild(box);
+        g_manager.getStage().removeChild(box.getSquare());
       }
     }
+    g_manager.getStage().update();
   }
 
   // 手持ちの箱を表示する
@@ -321,9 +368,11 @@ class Item {
         // 円のx + 半径 + space + index offset(1)
         box.create(
           this.circle.x + (g_valueTable.c_radius + 10) + (idx * (g_valueTable.s_width + 1)),
-           this.circle.y);
+          this.circle.y,
+          this);
       }
     }
+    g_manager.getStage().update();
   }
 
 } // class Item
@@ -382,6 +431,8 @@ function init() {
   // 数値計算
   g_valueTable.s_diagonal = Math.pow(g_valueTable.s_width, 2) + Math.pow(g_valueTable.s_hight, 2);
 
+  // 時間経過
+  createjs.Ticker.addEventListener("tick", handleTick);
 }
 
 function handleTick() {
@@ -399,6 +450,13 @@ function handleDown(event) {
   // ドラッグを開始した座標を覚えておく
   g_valueTable.m_dragPointX = g_manager.getStage().mouseX - instance.x;
   g_valueTable.m_dragPointY = g_manager.getStage().mouseY - instance.y;
+  // [Bug-1] Itemに登録されている時はhandleMoveFromCircleでないといけない
+  // [Bug-2] ここでEventを書き換えるとBox内のinstanceと==判定できなくなる。
+  //instance.addEventListener("pressmove", handleMove);
+  //instance.addEventListener("pressup", handleUp);
+  var box = g_manager.getBoxBySquare(instance);
+  box.addEvent();
+
 }
 
 function isHitObjs(square, circle) {
@@ -415,6 +473,21 @@ function isHitObjs(square, circle) {
   //return (((circle.x - square.x) < (radius + width)) && (circle.y - square.y) < (radius + height));
 }
 
+function handleMoveFromCircle(event) {
+  var instance = event.target;
+  instance.x = g_manager.getStage().mouseX - g_valueTable.m_dragPointX;
+  instance.y = g_manager.getStage().mouseY - g_valueTable.m_dragPointY;
+
+  var isLeave = g_manager.isLeaveObj(instance);
+  if (isLeave == true) {
+    console.log("Leave!");
+    // 離脱した
+    instance.removeEventListener("pressmove", handleMoveFromCircle);
+    instance.addEventListener("pressmove", handleMove);
+    g_manager.getStage().update();
+  }
+}
+
 function handleMove(event) {
   var instance = event.target;
   if (instance.visible == false) {
@@ -425,6 +498,9 @@ function handleMove(event) {
   // ただしドラッグ開始地点との補正をいれておく
   instance.x = g_manager.getStage().mouseX - g_valueTable.m_dragPointX;
   instance.y = g_manager.getStage().mouseY - g_valueTable.m_dragPointY;
+
+  // 初期位置からのMoveか、円からのMoveかで判定が違う。関数を分けるか分岐するか
+
 
   /*
   // 円からみたマウスカーソルの相対座標
